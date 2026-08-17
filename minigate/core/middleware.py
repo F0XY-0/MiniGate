@@ -2,7 +2,7 @@ from aiohttp import web
 
 from minigate.core.rate_limiter import RateLimiter
 
-rate_limiter = RateLimiter(capacity=10, refill_rate=1)
+rate_limiter = RateLimiter(cap=10, ref_rate=1)
 
 
 @web.middleware

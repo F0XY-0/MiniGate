@@ -24,7 +24,7 @@ class TokenBucket :
         return False
 
 # Holds one TokenBucket per client key (e.g. IP address).
-class RateLimitor:
+class RateLimiter:
     def __init__(self , cap = 10 , ref_rate = 1):
         self.cap = cap 
         self.ref_rate = ref_rate
