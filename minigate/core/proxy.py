@@ -29,18 +29,19 @@ async def PROXY_REQ(req: web.Request, backend_url: str) -> web.Response:
     body = await req.read()
     FORWARD_HEAD = FILTER_HEADERS(req.headers)
 
-    async with aiohttp.ClientSession() as session:
-        async with session.request(
-            method=req.method,
-            url=target_url,
-            headers=FORWARD_HEAD,
-            data=body if body else None,
-        ) as backend_response:
-            response_body = await backend_response.read()
-            response_headers = FILTER_HEADERS(backend_response.headers)
+    session = req.app["client_session"]
 
-            return web.Response(
-                body=response_body,
-                status=backend_response.status,
-                headers=response_headers,
-            )
+    async with session.request(
+        method=req.method,
+        url=target_url,
+        headers=FORWARD_HEAD,
+        data=body if body else None,
+    ) as backend_response:
+        response_body = await backend_response.read()
+        response_headers = FILTER_HEADERS(backend_response.headers)
+
+        return web.Response(
+            body=response_body,
+            status=backend_response.status,
+            headers=response_headers,
+        )
