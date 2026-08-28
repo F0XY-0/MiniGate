@@ -1,11 +1,9 @@
 import os
 import yaml
 import aiohttp
-
 from aiohttp import web
-
 from minigate.core.proxy import PROXY_REQ
-from minigate.core.middleware import rate_limit_middleware
+from minigate.core.middleware import AuthMiddleware, RateLimitMiddleware
 
 CONF_PATH = os.path.join(os.path.dirname(__file__) , ".." , "config" , "config.yaml")
 
@@ -28,19 +26,20 @@ async def CLIENT_SESSION_CTX(app: web.Application):
 
     await session.close()
 
-def CREATE_APP(conf : dict) -> web.Application:
-
-    BACKEND_URL = conf["backend"]["url"]
-
     """
     [backend] > should return > {"url": "http://127.0.0.1:9001"}
     [url] > should look in the key 'url' inside > return > str "http://127.0.0.1:9001"
     """
+def CREATE_APP(conf : dict) -> web.Application:
 
+    BACKEND_URL = conf["backend"]["url"]
     async def HANDEL_ALL(req : web.Request) -> web.Response :
         return await PROXY_REQ( req , BACKEND_URL )
 
-    app = web.Application(middlewares=[rate_limit_middleware])
+    auth_mw = AuthMiddleware(conf)
+    rate_limit_mw = RateLimitMiddleware(cap=10, ref_rate=1)
+
+    app = web.Application(middlewares=[auth_mw.handle, rate_limit_mw.handle])
     app.cleanup_ctx.append(CLIENT_SESSION_CTX)
     app.router.add_route("*", "/{tail:.*}" , HANDEL_ALL)
 
