@@ -1,0 +1,11 @@
+gateway:
+  port: 8080
+
+backend:
+  url: "http://127.0.0.1:9001"
+
+auth:
+  enabled: true
+  header_name: "X-API-Key"
+  api_keys:
+    "your-api-key-here": "client-name-here"
