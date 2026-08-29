@@ -1,12 +1,13 @@
 import os
 import yaml
 import aiohttp
-
 from aiohttp import web
+
 from minigate.core.proxy import PROXY_REQ
 from minigate.core.auth import APIKeyValidator, BUILD_AUTH_ERROR
 from minigate.core.jwt_auth import JwtHandler
 from minigate.core.middleware import JWTAuthMiddleware, RateLimitMiddleware
+from minigate.core.loadbalancer import Loadbalancer
 
 CONF_PATH = os.path.join(os.path.dirname(__file__) , ".." , "config" , "config.yaml")
 
@@ -30,16 +31,12 @@ async def CLIENT_SESSION_CTX(app: web.Application):
     await session.close()
 
 def CREATE_APP(conf : dict) -> web.Application:
-
-    BACKEND_URL = conf["backend"]["url"]
-
-    """
-    [backend] > should return > {"url": "http://127.0.0.1:9001"}
-    [url] > should look in the key 'url' inside > return > str "http://127.0.0.1:9001"
-    """
+    load_balancer = Loadbalancer(conf)
 
     async def HANDEL_ALL(req : web.Request) -> web.Response :
-        return await PROXY_REQ( req , BACKEND_URL )
+        backend_url = load_balancer.NEXT_BACKEND()
+        print(f"[gateway] routing {req.method} {req.path} -> {backend_url}")
+        return await PROXY_REQ( req , backend_url )
 
     api_key_validator = APIKeyValidator(conf)
     jwt_handler = JwtHandler(conf)
@@ -72,7 +69,7 @@ def main():
     gateWay_port = conf["gateway"]["port"]
 
     print(f"MiniGate listening on http://127.0.0.1:{gateWay_port}")
-    print(f"Forwarding to backend: {conf['backend']['url']}")
+    print(f"Forwarding to backend: {conf['backend']['urls']}")
 
     web.run_app(app , host="127.0.0.1" , port=gateWay_port)
 
