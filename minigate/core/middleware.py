@@ -1,7 +1,7 @@
 from aiohttp import web
 from minigate.core.rate_limiter import RateLimiter
-from minigate.core.auth import APIKeyValidator, BUILD_AUTH_ERROR
-
+from minigate.core.auth import APIKeyValidator, BUILD_AUTH_ERROR 
+from minigate.core.jwt_auth import JwtHandler 
 
 class AuthMiddleware:
 
@@ -24,6 +24,30 @@ class AuthMiddleware:
         req["client_name"] = client
         return await handler(req)
 
+class JWTAuthMiddleware:
+
+    def __init__(self, conf: dict):
+        self.jwt_handler = JwtHandler(conf)
+
+    @web.middleware
+    async def handle(self, req: web.Request, handler):
+
+        if req.path == "/token":
+            return await handler(req)
+
+        auth_header = req.headers.get("Authorization", "")
+
+        if not auth_header.startswith("Bearer "):
+            return self.jwt_handler.BUILD_JWT_ERROR("Missing or invalid Authorization header", 401)
+
+        token = auth_header[len("Bearer "):]
+        client = self.jwt_handler.VERIFY_TOKEN(token)
+
+        if client is None:
+            return self.jwt_handler.BUILD_JWT_ERROR("Invalid or expired token", 401)
+
+        req["client_name"] = client
+        return await handler(req)        
 
 class RateLimitMiddleware:
 

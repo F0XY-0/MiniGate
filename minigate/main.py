@@ -1,9 +1,12 @@
 import os
 import yaml
 import aiohttp
+
 from aiohttp import web
 from minigate.core.proxy import PROXY_REQ
-from minigate.core.middleware import AuthMiddleware, RateLimitMiddleware
+from minigate.core.auth import APIKeyValidator, BUILD_AUTH_ERROR
+from minigate.core.jwt_auth import JwtHandler
+from minigate.core.middleware import JWTAuthMiddleware, RateLimitMiddleware
 
 CONF_PATH = os.path.join(os.path.dirname(__file__) , ".." , "config" , "config.yaml")
 
@@ -26,21 +29,37 @@ async def CLIENT_SESSION_CTX(app: web.Application):
 
     await session.close()
 
+def CREATE_APP(conf : dict) -> web.Application:
+
+    BACKEND_URL = conf["backend"]["url"]
+
     """
     [backend] > should return > {"url": "http://127.0.0.1:9001"}
     [url] > should look in the key 'url' inside > return > str "http://127.0.0.1:9001"
     """
-def CREATE_APP(conf : dict) -> web.Application:
 
-    BACKEND_URL = conf["backend"]["url"]
     async def HANDEL_ALL(req : web.Request) -> web.Response :
         return await PROXY_REQ( req , BACKEND_URL )
 
-    auth_mw = AuthMiddleware(conf)
+    api_key_validator = APIKeyValidator(conf)
+    jwt_handler = JwtHandler(conf)
+
+    async def HANDLE_TOKEN(req: web.Request) -> web.Response:
+        key = req.headers.get(api_key_validator.HEADER_NAME)
+        client = api_key_validator.VALIDATE_KEY(key)
+
+        if client is None:
+            return BUILD_AUTH_ERROR("Invalid or missing API key", 401)
+
+        token = jwt_handler.GENERATE_TOKENS(client)
+        return web.json_response({"token": token})
+
+    jwt_mw = JWTAuthMiddleware(conf)
     rate_limit_mw = RateLimitMiddleware(cap=10, ref_rate=1)
 
-    app = web.Application(middlewares=[auth_mw.handle, rate_limit_mw.handle])
+    app = web.Application(middlewares=[jwt_mw.handle, rate_limit_mw.handle])
     app.cleanup_ctx.append(CLIENT_SESSION_CTX)
+    app.router.add_route("POST", "/token", HANDLE_TOKEN)
     app.router.add_route("*", "/{tail:.*}" , HANDEL_ALL)
 
     return app
