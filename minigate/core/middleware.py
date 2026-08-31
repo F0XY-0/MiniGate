@@ -42,7 +42,7 @@ class JWTAuthMiddleware:
 
         token = auth_header[len("Bearer "):]
         client = self.jwt_handler.VERIFY_TOKEN(token)
-
+        
         if client is None:
             return self.jwt_handler.BUILD_JWT_ERROR("Invalid or expired token", 401)
 

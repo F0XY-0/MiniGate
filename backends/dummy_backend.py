@@ -1,6 +1,7 @@
 import argparse
 import json
 import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 """
@@ -10,6 +11,14 @@ port (default 9001) and responds to any GET/POST/PUT/DELETE with a JSON body
 
 class DummyHead(BaseHTTPRequestHandler):
     port = 9001
+
+    def _log_line(self , method : str ) : 
+        timetamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+        clinetip , clinet_port = self.client_address 
+        print(
+            f"{timetamp} [backend :{self.port}]" 
+            f"{clinetip}:{clinet_port} -> {method} {self.path}"
+        )
 
     def _handler(self, method):
         body = {
@@ -48,16 +57,16 @@ class DummyHead(BaseHTTPRequestHandler):
         self._handler('DELETE')
 
     def log_message(self, format_str, *args):
-        print(f"[backend >:{self.port} {format_str % args}]")
+        pass # changed do the cli new message 
 
 def main():
     parser = argparse.ArgumentParser(description="dummy backend for the mini gate")
     parser.add_argument("--port", type=int, default=9001, help="port to listen on")
-
     args = parser.parse_args()
-    DummyHead.port = args.port
 
+    DummyHead.port = args.port
     server = ThreadingHTTPServer(('127.0.0.1', args.port), DummyHead)
+    
     print(f"Dummy backend running on http://127.0.0.1:{args.port}")
 
     try:
