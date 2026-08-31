@@ -12,16 +12,16 @@ Starts 3 dummy backends + the gateway as background processes,
 runs test requests through the full auth/rate-limit/load-balance chain,
 then shuts everything down.
 """
-
 GATEWAY_URL = "http://127.0.0.1:8080"
 API_KEY = "dev-key-12345"
-TOTAL_REQUESTS = 15
-
+TOTAL_REQUESTS = 40 
+KILL_BACKEND_AFTER = 5   
+KILL_PORT = 9002
 
 class ProcessManager:
 
     def __init__(self):
-        self.procs = []
+        self.procs = {}
 
     def START_ALL(self):
         for port in [9001, 9002, 9003]:
@@ -31,7 +31,7 @@ class ProcessManager:
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-            self.procs.append(("backend-" + str(port), p))
+            self.procs["backend-" + str(port)] = p
 
         gateway = subprocess.Popen(
             [sys.executable, "-m", "minigate.main"],
@@ -39,18 +39,25 @@ class ProcessManager:
             stderr=subprocess.STDOUT,
             text=True,
         )
-        self.procs.append(("gateway", gateway))
+        self.procs["gateway"] = gateway
+
+    def KILL_BACKEND(self, port: int):
+        name = "backend-" + str(port)
+        if name in self.procs:
+            print(f"\n>>> Killing {name} to simulate a failure <<<\n")
+            self.procs[name].terminate()
+            self.procs[name].wait()
+            del self.procs[name]
 
     def SHUTDOWN_ALL(self):
-        print("\nShutting down all processes...")
+        print("\nShutting down remaining processes...")
 
-        for i in range(len(self.procs)):
-            name, p = self.procs[i]
-            p.terminate()
+        names = list(self.procs.keys())
+        for i in range(len(names)):
+            self.procs[names[i]].terminate()
 
-        for i in range(len(self.procs)):
-            name, p = self.procs[i]
-            p.wait()
+        for i in range(len(names)):
+            self.procs[names[i]].wait()
 
 
 class GatewayClient:
@@ -76,20 +83,22 @@ class GatewayClient:
             headers={"Authorization": f"Bearer {self.TOKEN}"},
         )
         try:
-            response = urllib.request.urlopen(req)
+            response = urllib.request.urlopen(req, timeout=3)
             body = json.loads(response.read())
             return response.status, body.get("backend_port")
         except urllib.error.HTTPError as e:
             return e.code, None
+        except (urllib.error.URLError, TimeoutError):
+            return None, None  # gateway itself unreachable, shouldn't normally happen
 
 
 class TestRunner:
 
-    def __init__(self, client: GatewayClient, total_requests: int):
+    def __init__(self, client: GatewayClient, manager: ProcessManager, total_requests: int):
         self.client = client
+        self.manager = manager
         self.TOTAL_REQUESTS = total_requests
-        self.allowed = 0
-        self.blocked = 0
+        self.results = []
         self.ports_hit = {}
 
     def RUN(self):
@@ -98,25 +107,49 @@ class TestRunner:
 
         print("Requesting JWT via /token...")
         self.client.FETCH_TOKEN()
-        print(f"Got token: {self.client.TOKEN[:30]}...")
-
-        print(f"\nSending {self.TOTAL_REQUESTS} requests through the gateway...\n")
+        print(f"Got token: {self.client.TOKEN[:30]}...\n")
 
         for i in range(self.TOTAL_REQUESTS):
+
+            if i == KILL_BACKEND_AFTER:
+                self.manager.KILL_BACKEND(KILL_PORT)
+                time.sleep(1)  # give things a moment to settle
+
             status, backend_port = self.client.SEND_REQUEST()
+            self.results.append(status)
             print(f"request {i + 1}: {status} (backend: {backend_port})")
 
             if status == 200:
-                self.allowed += 1
                 self.ports_hit[backend_port] = self.ports_hit.get(backend_port, 0) + 1
-            elif status == 429:
-                self.blocked += 1
+
+            time.sleep(1.2)  # spread requests out so rate limiting doesn't dominate the run
 
     def PRINT_SUMMARY(self):
+        allowed = 0
+        blocked = 0
+        errors = 0
+        unavailable = 0
+
+        for i in range(len(self.results)):
+            status = self.results[i]
+            if status == 200:
+                allowed += 1
+            elif status == 429:
+                blocked += 1
+            elif status == 502:
+                errors += 1
+            elif status == 503:
+                unavailable += 1
+
         print()
-        print(f"allowed (200): {self.allowed}")
-        print(f"blocked (429): {self.blocked}")
-        print(f"load distribution: {self.ports_hit}")
+        print(f"allowed (200): {allowed}")
+        print(f"rate-limited (429): {blocked}")
+        print(f"backend errors (502): {errors}")
+        print(f"all-backends-down (503): {unavailable}")
+        print(f"load distribution (successful requests): {self.ports_hit}")
+        print(f"\nNote: {KILL_PORT} was killed after request {KILL_BACKEND_AFTER}.")
+        print(f"Watch above for requests routed to it failing (502), then it")
+        print(f"disappearing from routing once its circuit breaker trips OPEN.")
 
 
 def main():
@@ -125,7 +158,7 @@ def main():
 
     try:
         client = GatewayClient(GATEWAY_URL, API_KEY)
-        runner = TestRunner(client, TOTAL_REQUESTS)
+        runner = TestRunner(client, manager, TOTAL_REQUESTS)
         runner.RUN()
         runner.PRINT_SUMMARY()
     finally:

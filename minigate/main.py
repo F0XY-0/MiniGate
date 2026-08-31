@@ -8,6 +8,8 @@ from minigate.core.auth import APIKeyValidator, BUILD_AUTH_ERROR
 from minigate.core.jwt_auth import JwtHandler
 from minigate.core.middleware import JWTAuthMiddleware, RateLimitMiddleware
 from minigate.core.loadbalancer import Loadbalancer
+from minigate.core.circuit_breaker import Circuitbreaker
+
 
 CONF_PATH = os.path.join(os.path.dirname(__file__) , ".." , "config" , "config.yaml")
 
@@ -31,12 +33,25 @@ async def CLIENT_SESSION_CTX(app: web.Application):
     await session.close()
 
 def CREATE_APP(conf : dict) -> web.Application:
-    load_balancer = Loadbalancer(conf)
+    circuit_breaker = Circuitbreaker(failure_threshold=5, recovery_timeout=30, success_threshold=2)
+    load_balancer = Loadbalancer(conf, circuit_breaker=circuit_breaker)
 
     async def HANDEL_ALL(req : web.Request) -> web.Response :
         backend_url = load_balancer.NEXT_BACKEND()
+
+        if backend_url is None : 
+            return web.json_response({"error" : "all backends are unavailable"} , status=503 )
+
         print(f"[gateway] routing {req.method} {req.path} -> {backend_url}")
-        return await PROXY_REQ( req , backend_url )
+
+        try:
+            response = await PROXY_REQ( req , backend_url )
+            circuit_breaker.RECORD_SUCCESS(backend_url)
+            return response
+        except aiohttp.ClientError:
+            circuit_breaker.RECORD_FAILURE(backend_url)
+            return web.json_response({"error": "backend request failed"}, status=502)
+
 
     api_key_validator = APIKeyValidator(conf)
     jwt_handler = JwtHandler(conf)
