@@ -12,6 +12,7 @@ Starts 3 dummy backends + the gateway as background processes,
 runs test requests through the full auth/rate-limit/load-balance chain,
 then shuts everything down.
 """
+
 GATEWAY_URL = "http://127.0.0.1:8080"
 API_KEY = "dev-key-12345"
 TOTAL_REQUESTS = 40 
@@ -35,9 +36,6 @@ class ProcessManager:
 
         gateway = subprocess.Popen(
             [sys.executable, "-m", "minigate.main"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
         )
         self.procs["gateway"] = gateway
 
